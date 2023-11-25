@@ -19,7 +19,15 @@ our %actions = (
 our @actions = sort keys %actions;
 
 our %tables = (
-    'daily-releases' => 'CPAN authors that release something everyday',
+    'daily-releases'            => 'CPAN authors that release something everyday',
+    'daily-new-releases'        => 'CPAN authors that release a (for-them) new distribution everyday',
+    'daily-new-distributions'   => 'CPAN authors that release a new distribution everyday',
+    'weekly-releases'           => 'CPAN authors that release something every week',
+    'weekly-new-releases'       => 'CPAN authors that release a (for-them) new distribution every week',
+    'weekly-new-distributions'  => 'CPAN authors that release a new distribution every week',
+    'monthly-releases'          => 'CPAN authors that release something every month',
+    'monthly-new-releases'      => 'CPAN authors that release a (for-them) new distribution every month',
+    'monthly-new-distributions' => 'CPAN authors that release a new distribution every momth',
 );
 our @tables = sort keys %tables;
 
@@ -30,7 +38,7 @@ $SPEC{cpan_streaks} = {
         action => {
             schema => ['str*', {in=>\@actions, 'x.in.summaries' => [map { $actions{$_} } @actions]}],
             cmdline_aliases => {
-                list_tables => {is_flag=>1, code=>sub { $_[0]{action} = 'list-tables' }, summary>'Shortcut for --action=list-tables'},
+                list_tables => {is_flag=>1, code=>sub { $_[0]{action} = 'list-tables' }, summary=>'Shortcut for --action=list-tables'},
             },
             default => 'calculate',
             req => 1,
@@ -39,6 +47,14 @@ $SPEC{cpan_streaks} = {
         table => {
             schema => ['str*', {in=>\@tables, 'x.in.summaries'=>[map { $tables{$_} } @tables]}],
             pos => 1,
+        },
+        author => {
+            summary => 'Only calculate streaks for certain authors',
+            schema => 'cpan::pause_id*',
+        },
+        exclude_broken => {
+            schema => 'bool*',
+            default => 1,
         },
     },
 };
@@ -50,44 +66,62 @@ sub cpan_streaks {
     if ($action eq 'list-tables') {
         return [200, "OK", \%tables];
     } elsif ($action eq 'calculate') {
-        require TableData::Perl::CPAN::Release::Static;
-        require DateTime;
-        require DateTime::Format::ISO8601;
         require Set::Streak;
+        my @period_names = (''); # index=period, value=name
 
-        my $td = TableData::Perl::CPAN::Release::Static->new;
-        my @sets;
-        my ($min_time, $max_time);
-
-        if ($table eq 'daily-releases') {
-            my $cur_date;
-            log_trace "Creating sets ...";
-            $td->each_row_hashref(
-                sub {
-                    my $row = shift;
-                    my $dt = DateTime::Format::ISO8601->parse_datetime($row->{date});
-                    my $date = DateTime->ymd;
-                    if (!$cur_date) {
-                        $cur_date = $date;
-                        push @sets, [];
-                    } elsif ($cur_date ne $date) {
-                        $cur_date = $date;
-                        push @sets, [];
-                    } else {
-                        push @{ $sets[-1] }, $row->{author} unless grep { $_ eq $row->{author} } @{ $sets[-1] };
-                    }
-                });
-            log_trace "Calculating streaks ...";
-            my $res = Set::Streak::gen_longest_streaks_table(
-                sets => \@sets,
-            );
-            return [200, "OK", $res];
+        my $td;
+        if ($table =~ /daily/) {
+            require TableData::Perl::CPAN::Release::Static::GroupedDaily;
+            $td = TableData::Perl::CPAN::Release::Static::GroupedDaily->new;
+        } elsif ($table =~ /weekly/) {
+            require TableData::Perl::CPAN::Release::Static::GroupedWeekly;
+            $td = TableData::Perl::CPAN::Release::Static::GroupedWeekly->new;
         } else {
-            return [404, "Unknown streak table '$table'"];
+            require TableData::Perl::CPAN::Release::Static::GroupedMonthly;
+            $td = TableData::Perl::CPAN::Release::Static::GroupedMonthly->new;
         }
 
+        log_trace "Creating sets ...";
+        my @sets;
+        my (%seen_dists, %seen_author_dists);
+        $td->each_row_arrayref(
+            sub {
+                my $row = shift;
+                my ($period, $rels) = @$row;
+                push @period_names, $period;
+                push @sets, [];
+                for my $rel (@$rels) {
+                    my ($author, $dist) = ($rel->[2], $rel->[7]);
+                    if (defined $args{author}) { next unless $author eq $args{author} }
+                    if ($table =~ /new-releases/) {
+                        next if $seen_author_dists{$author}{$dist}++;
+                    } elsif ($table =~ /new-distributions/) {
+                        next if $seen_dists{$author}{$dist}++;
+                    }
+                    push @{ $sets[-1] }, $author unless grep { $_ eq $author } @{ $sets[-1] };
+                }
+                1;
+            });
+        log_trace "Calculating streaks ...";
+        my $rows = Set::Streak::gen_longest_streaks_table(
+            sets => \@sets,
+            exclude_broken => $args{exclude_broken},
+        );
+        for my $row (@$rows) {
+            $row->{start_date} = $period_names[ $row->{start} ];
+            if ($row->{status} eq 'broken') {
+                my $p = $row->{start} + $row->{len} - 1;
+                $row->{end_date} = $period_names[ $p ];
+            }
+            delete $row->{start};
+            $row->{author} = delete $row->{item};
+        }
+        return [200, "OK", $rows, {'table.fields'=>[qw/author len start_date end_date status/]}];
+
     } else {
+
         return [400, "Unknown action '$action'"];
+
     }
 }
 
