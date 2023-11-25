@@ -20,13 +20,13 @@ our @actions = sort keys %actions;
 
 our %tables = (
     'daily-releases'            => 'CPAN authors that release something everyday',
-    'daily-new-releases'        => 'CPAN authors that release a (for-them) new distribution everyday',
+    'daily-distributions'       => 'CPAN authors that release a (for-them) new distribution everyday',
     'daily-new-distributions'   => 'CPAN authors that release a new distribution everyday',
     'weekly-releases'           => 'CPAN authors that release something every week',
-    'weekly-new-releases'       => 'CPAN authors that release a (for-them) new distribution every week',
+    'weekly-distributions'      => 'CPAN authors that release a (for-them) new distribution every week',
     'weekly-new-distributions'  => 'CPAN authors that release a new distribution every week',
     'monthly-releases'          => 'CPAN authors that release something every month',
-    'monthly-new-releases'      => 'CPAN authors that release a (for-them) new distribution every month',
+    'monthly-distributions'     => 'CPAN authors that release a (for-them) new distribution every month',
     'monthly-new-distributions' => 'CPAN authors that release a new distribution every momth',
 );
 our @tables = sort keys %tables;
@@ -93,10 +93,10 @@ sub cpan_streaks {
                 for my $rel (@$rels) {
                     my ($author, $dist) = ($rel->[2], $rel->[7]);
                     if (defined $args{author}) { next unless $author eq $args{author} }
-                    if ($table =~ /new-releases/) {
-                        next if $seen_author_dists{$author}{$dist}++;
-                    } elsif ($table =~ /new-distributions/) {
+                    if ($table =~ /-new-distributions/) {
                         next if $seen_dists{$author}{$dist}++;
+                    } elsif ($table =~ /-distributions/) {
+                        next if $seen_author_dists{$author}{$dist}++;
                     }
                     push @{ $sets[-1] }, $author unless grep { $_ eq $author } @{ $sets[-1] };
                 }
