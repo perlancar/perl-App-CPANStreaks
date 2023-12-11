@@ -56,6 +56,9 @@ $SPEC{cpan_streaks} = {
             schema => 'bool*',
             default => 1,
         },
+        min_len => {
+            schema => 'posint*',
+        },
     },
 };
 sub cpan_streaks {
@@ -106,6 +109,7 @@ sub cpan_streaks {
         my $rows = Set::Streak::gen_longest_streaks_table(
             sets => \@sets,
             exclude_broken => $args{exclude_broken},
+            min_len => $args{min_len},
         );
         for my $row (@$rows) {
             $row->{start_date} = $period_names[ $row->{start} ];
